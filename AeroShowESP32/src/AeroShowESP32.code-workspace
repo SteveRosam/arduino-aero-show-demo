@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "AeroShowESP32",
+			"path": ".."
+		},
+		{
+			"name": "OTA Test",
+			"path": "../../OTA Test"
+		}
+	],
+	"settings": {}
+}
