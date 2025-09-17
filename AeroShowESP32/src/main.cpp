@@ -144,7 +144,7 @@ void configureOTA();
 void configureOTA() {
   // Configure OTA
   ArduinoOTA.setHostname("ESP32-OTA");
-
+  
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
@@ -309,9 +309,9 @@ void setup() {
     // Handle WiFi connection failure (e.g., blink LED)
     while (1) {
       digitalWrite(2, HIGH);
-      delay(500);
+      delay(100);
       digitalWrite(2, LOW);
-      delay(500);
+      delay(100);
     }
   }
   
@@ -332,10 +332,17 @@ void setup() {
   configureOTA();
 }
 
+bool led_state = true;
+long led_millis = millis();
+long OK_BLINK_RATE = 1000;
+
 void loop() {
 
   ArduinoOTA.handle();  // CRITICAL: This must run frequently!
 
+  if (millis() - OK_BLINK_RATE > 1000) { 
+    digitalWrite(2, led_state ? HIGH : LOW);
+  }  
 
   static unsigned long lastLoopDebug = 0;
   if (millis() - lastLoopDebug > 5000) {  // Every 5 seconds
