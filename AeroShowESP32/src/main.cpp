@@ -342,6 +342,7 @@ void loop() {
 
   if (millis() - OK_BLINK_RATE > 1000) { 
     digitalWrite(2, led_state ? HIGH : LOW);
+    led_millis = millis();
   }  
 
   static unsigned long lastLoopDebug = 0;
