@@ -155,7 +155,6 @@ void configureOTA() {
       type = "filesystem";
     }
     log("Start updating " + type);
-    log("Expected size: " + String(ArduinoOTA.getSize()));
   });
 
   ArduinoOTA.onEnd([]() {
