@@ -144,7 +144,9 @@ void configureOTA();
 void configureOTA() {
   // Configure OTA
   ArduinoOTA.setHostname("ESP32-OTA");
-  
+  // ArduinoOTA.setPort(8080);
+  ArduinoOTA.setMdnsEnabled(false);
+
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
@@ -153,6 +155,7 @@ void configureOTA() {
       type = "filesystem";
     }
     log("Start updating " + type);
+    log("Expected size: " + String(ArduinoOTA.getSize()));
   });
 
   ArduinoOTA.onEnd([]() {
@@ -340,8 +343,9 @@ void loop() {
 
   ArduinoOTA.handle();  // CRITICAL: This must run frequently!
 
-  if (millis() - OK_BLINK_RATE > 1000) { 
+  if (millis() - led_millis > OK_BLINK_RATE) { 
     digitalWrite(2, led_state ? HIGH : LOW);
+    led_state = !led_state;
     led_millis = millis();
   }  
 
@@ -522,6 +526,13 @@ void handleRoot() {
   html += "<h1>ESP32 Motor Control System</h1>";
   html += "<p>System Status: " + String(testRunning ? "Test Running" : "Ready") + "</p>";
   html += "<p>Current Test ID: " + currentTestId + "</p>";
+  html += "<h2>Network Info:</h2>";
+  html += "<p>IP Address: " + WiFi.localIP().toString() + "</p>";
+  html += "<p>MAC Address: " + WiFi.macAddress() + "</p>";
+  html += "<p>RSSI: " + String(WiFi.RSSI()) + " dBm</p>";
+  html += "<h2>OTA Status:</h2>";
+  html += "<p>OTA Port: 3232 (default)</p>";
+  html += "<p>Hostname: " + String(ArduinoOTA.getHostname()) + "</p>";
   html += "<h2>Sensor Readings:</h2>";
   html += "<p>Load Cell: " + String(readLoadCell()) + "</p>";
   html += "<p>INA260 Voltage: " + String(readINA260Voltage()) + "V</p>";
