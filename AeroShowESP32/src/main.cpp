@@ -2,7 +2,7 @@
 #include <WebServer.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <ESP32Servo.h>
+#include "ESCController.h"  // Replace ESP32Servo with our ESCController
 #include <Wire.h>
 #include <Adafruit_INA260.h>
 #include <vector>
@@ -18,13 +18,10 @@
 const int HX711_DT_PIN = 4;   // Data pin
 const int HX711_SCK_PIN = 5;  // Clock pin
 
-// ESC configuration
-#define ESC_MIN_PULSE 1000  // Minimum pulse width in microseconds
-#define ESC_MAX_PULSE 2000  // Maximum pulse width in microseconds
-
 // Global objects
-Servo esc;  // Create servo object to control the ESC
+ESCController motor(ESC_PIN);  // Replace Servo with ESCController
 Adafruit_INA260 ina260 = Adafruit_INA260();
+bool ina260Ready = false;
 WiFiManager wifiManager;
 
 // Load cell state
@@ -114,32 +111,6 @@ void log(String message);
 void showText(String text, int line);
 void configureOTA();
 
-// void scanI2C() {
-//   byte error, address;
-//   int devices = 0;
-
-//   for(address = 1; address < 127; address++) {
-//     Wire.beginTransmission(address);
-//     error = Wire.endTransmission();
-
-//     if (error == 0) {
-//       log("I2C device found at address 0x");
-//       if (address < 16) log("0");
-//       log(String(address));
-//       log(" !");
-//       devices++;
-//     }
-//   }
-  
-//   if (devices == 0) {
-//     log("No I2C devices found - check wiring!");
-//   } else {
-//     log("Found ");
-//     log(String(devices));
-//     log(" device(s)");
-//   }
-//   log("\n");
-// }
 
 void configureOTA() {
   // Configure OTA
@@ -258,41 +229,11 @@ void setup() {
   Serial.begin(115200);
   delay(1000); // Give time for serial to initialize
 
-  log("OLED Troubleshooting Started");
-  
   // Initialize I2C with specific pins for ESP32
   Wire.begin(21, 22); // SDA=21, SCL=22 for ESP32
   setupDisplay();
   drawLogo();
-  // display.drawBitmap(0, 0, 128, 32, logo_bits, SSD1306_WHITE);
-  // delay(5000);
-  // display.clearDisplay();
-  
-  // Scan for I2C devices
-  // log("Scanning for I2C devices...");
-  // scanI2C();
-
-  // Try first address
-  // log("Trying address 0x3C...");
-  // if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS_1)) {
-  //   log("Display found at 0x3C!");
-  // } else {
-  //   log("No display at 0x3C, trying 0x3D...");
-    
-  //   // Try second address
-  //   if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS_2)) {
-  //     log("Display found at 0x3D!");
-  //   } else {
-  //     log("No display found at either address!");
-  //     log("Check wiring:");
-  //     log("SDA -> GPIO21");
-  //     log("SCL -> GPIO22");
-  //     log("VCC -> 3.3V");
-  //     log("GND -> GND");
-  //   }
-  // }
-
-
+ 
   // Initial debug output
   log("\n=== AeroShow ESP32 Starting ===");
   log("Debug output initialized");
@@ -301,7 +242,7 @@ void setup() {
   log(" bytes");
   log("ESP32 Motor Control & Sensor System Starting...");
 
-  wifiManager.setReportURL("https://gateway-3-demo-aerospacetestingdevelopmentshow-prod.demo.quix.io/data");
+  wifiManager.setReportURL(REPORT_URL);
 
   showText("Connecting to WiFi");
 
@@ -368,8 +309,8 @@ void loop() {
     reading.timestamp = millis();
     
     // Read INA260
-    reading.voltage = ina260.readBusVoltage();
-    reading.current = ina260.readCurrent();
+    reading.voltage = readINA260Voltage();
+    reading.current = readINA260Current();
     
     // Always try to read the load cell, the function will handle retries and timeouts
     reading.load_cell = readLoadCell() - loadCellTareValue;
@@ -442,9 +383,11 @@ void setupSensors() {
   log(" - Initializing INA260...");
   if (ina260.begin()) {
     log(" - INA260 initialized successfully");
+    ina260Ready = true;
   } else {
     log("Error: Could not find INA260 chip");
-    while (1); // Halt if INA260 not found
+    ina260Ready = false;
+    //while (1); // Halt if INA260 not found
   }
   
   // Initialize HX711 pins
@@ -466,14 +409,14 @@ void setupSensors() {
 }
 
 void setupESC() {
-  esc.attach(ESC_PIN, ESC_MIN_PULSE, ESC_MAX_PULSE);
+  log("Initializing ESC controller...");
   
-  // ESC initialization sequence
-  log("Initializing ESC...");
-  esc.writeMicroseconds(ESC_MIN_PULSE); // Send minimum throttle
-  delay(2000); // Wait for ESC to recognize the signal
-  
-  log("ESC initialized");
+  // The ESCController's initialize() method handles all calibration
+  if (motor.initialize()) {
+    log("ESC initialized successfully!");
+  } else {
+    log("ESC initialization failed!");
+  }
 }
 
 void setupWebServer() {
@@ -575,15 +518,31 @@ void handleMotorControl() {
     return;
   }
   
-  server.send(200, "application/json", "{\"status\":\"Test started\"}");
+  server.send(200, "application/json", "{\"status\":\"Test started - ESC will be initialized\"}");
   
   // Start the motor test (non-blocking)
   log("\n=== Starting test from handleMotorControl ===");
+  log("Note: ESC will be re-initialized for this test");
   startMotorTest(doc);
 }
 
 void startMotorTest(JsonDocument& config) {
   log("\n=== Starting Motor Test ===");
+
+  // Initialize ESC first since battery may have been disconnected
+  log("Re-initializing ESC for new test...");
+  showText("Initializing ESC...", 1);
+  
+  // if (!motor.initialize()) {
+  //   log("ESC initialization failed! Cannot start test.");
+  //   showText("ESC Init Failed!", 1);
+  //   delay(2000);
+  //   return;
+  // }
+  
+  log("ESC initialized successfully for test");
+  showText("ESC Ready", 1);
+  delay(1000);
 
   testRunning = true;
   currentTestId = config["test_id"].as<String>();
@@ -595,8 +554,17 @@ void startMotorTest(JsonDocument& config) {
   // Clear any old data
   sensorBuffer.clear();
   
-  // Initialize ESC
-  esc.writeMicroseconds(ESC_MIN_PULSE);
+  // Set the first speed from the test configuration
+  if (testState.speeds.size() > 0) {
+    float initialSpeed = testState.speeds[0];
+    motor.setSpeed(initialSpeed);
+    currentSpeed = initialSpeed;
+    log("Setting initial speed to: " + String(initialSpeed));
+  } else {
+    motor.setSpeed(0.0);
+    currentSpeed = 0.0;
+    log("Warning: No speeds defined in test!");
+  }
   
   // Start data collection
   lastSendTime = millis();
@@ -611,42 +579,6 @@ void startMotorTest(JsonDocument& config) {
   showText("Starting Test with " + String(testState.rampDelay / 100, 2) + "s per step", 1);
   delay(1000);
 }
-
-// void updateMotorTest() {
-//   if (!testRunning || testState.currentSpeedIndex >= testState.speeds.size()) {
-//     return;
-//   }
-  
-//   // Check if it's time to move to the next speed
-//   if (millis() - testState.speedStartTime >= testState.rampDelay) {
-//     testState.currentSpeedIndex++;
-//     testState.speedStartTime = millis();
-    
-//     if (testState.currentSpeedIndex < testState.speeds.size()) {
-//       // Set next speed
-//       float speedValue = testState.speeds[testState.currentSpeedIndex];
-//       int pwmValue = ESC_MIN_PULSE + (speedValue * (ESC_MAX_PULSE - ESC_MIN_PULSE));
-      
-//       showText("Speed: " + String(speedValue, 2), 2);
-      
-//       esc.writeMicroseconds(pwmValue);
-//       currentSpeed = speedValue;
-//     } else {
-//       // Test complete
-//       log("Test completed: " + currentTestId);
-//       showText("Test Complete", 2);
-//       esc.writeMicroseconds(ESC_MIN_PULSE);
-//       testRunning = false;
-      
-//       // Send any remaining data
-//       if (!sensorBuffer.empty()) {
-//         sendBufferedData();
-//       }
-      
-//       currentTestId = "";
-//     }
-//   }
-// }
 
 void updateMotorTest() {
   if (!testRunning || testState.currentSpeedIndex >= testState.speeds.size()) {
@@ -665,12 +597,21 @@ void updateMotorTest() {
   if (millis() - lastDisplayUpdate >= 10 || testState.currentSpeedIndex != lastSpeedIndex) {
     if (testState.currentSpeedIndex < testState.speeds.size()) {
       float speedValue = testState.speeds[testState.currentSpeedIndex];
-      showText("Speed: " + String(speedValue, 2) + " T:" + String(millisRemaining), 2);
+      showText("Speed: " + String(speedValue, 2), 2);
     }
     lastDisplayUpdate = millis();
     lastSpeedIndex = testState.currentSpeedIndex;
   }
   
+  log("-----------------------------");
+  log("Current speed index: ");
+  log(testState.currentSpeedIndex);
+  log("Number of speed steps: ");
+  log(testState.speeds.size());
+  log("Ramp delay (ms): ");
+  log(testState.rampDelay); 
+  log("-----------------------------");
+
   // Check if it's time to move to the next speed
   if (millis() - testState.speedStartTime >= testState.rampDelay) {
     testState.currentSpeedIndex++;
@@ -679,10 +620,11 @@ void updateMotorTest() {
     if (testState.currentSpeedIndex < testState.speeds.size()) {
       // Set next speed
       float speedValue = testState.speeds[testState.currentSpeedIndex];
-      int pwmValue = ESC_MIN_PULSE + (speedValue * (ESC_MAX_PULSE - ESC_MIN_PULSE));
+      
+      log(">>> CHANGING SPEED: Index " + String(testState.currentSpeedIndex) + " = " + String(speedValue));
       
       // Display will be updated at the top of the next loop iteration
-      esc.writeMicroseconds(pwmValue);
+      motor.setSpeed(speedValue);
       currentSpeed = speedValue;
     } else {
       // Test complete
@@ -690,7 +632,7 @@ void updateMotorTest() {
       showText("Test Complete", 1);
       showText(" ", 2);
 
-      esc.writeMicroseconds(ESC_MIN_PULSE);
+      motor.stop();
       testRunning = false;
       
       // Send any remaining data
@@ -727,13 +669,13 @@ void sendBufferedData() {
     return;
   }
   
-  log("Sending ");
+  // log("Sending ");
   showText("Sending buffer", 3);
   log(String(sensorBuffer.size()));
   log(" data points to server...");
   
   HTTPClient http;
-  String url = "https://http-api-source-bc198-demo-aerospacetestingdevelopmentshow-prod.demo.quix.io/data/" + currentTestId;
+  String url = DATA_URL + currentTestId;
   
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
@@ -742,7 +684,7 @@ void sendBufferedData() {
   DynamicJsonDocument doc(16384);  // Allocate 16KB for the document
   JsonArray data = doc.createNestedArray("data");
   
-  log("Created JSON document");
+  // log("Created JSON document");
   
   // Add all buffered readings to the JSON array
   for (const auto& reading : sensorBuffer) {
@@ -770,7 +712,7 @@ void sendBufferedData() {
   if (httpResponseCode > 0) {
     String response = http.getString();
     log("Success! Sent " + String(sensorBuffer.size()) + " samples. Response: " + String(httpResponseCode));
-    log("Server response: " + String(response));
+    // log("Server response: " + String(response));
     showText("Buffer send success", 3);
   } else {
     log("Error sending data: " + String(httpResponseCode));
@@ -847,10 +789,10 @@ bool isLoadCellReady() {
   if (now - lastPrint > 2000) {
     lastPrint = now;
     float readyPercent = (readyCount * 100.0) / (readyCount + notReadyCount);
-    log("HX711 Ready: ");
-    log(String(readyPercent));
-    log("%, DT pin state: ");
-    log(digitalRead(HX711_DT_PIN) ? "HIGH" : "LOW");
+    // log("HX711 Ready: ");
+    // log(String(readyPercent));
+    // log("%, DT pin state: ");
+    // log(digitalRead(HX711_DT_PIN) ? "HIGH" : "LOW");
     readyCount = 0;
     notReadyCount = 0;
   }
@@ -914,10 +856,16 @@ float readLoadCell() {
 }
 
 float readINA260Voltage() {
+  if (!ina260Ready) {
+    return 0.0f;
+  }
   float voltage = ina260.readBusVoltage() / 1000.0; // Convert mV to V
   return voltage;
 }
 
 float readINA260Current() {
+  if (!ina260Ready) {
+    return 0.0f;
+  }
   return ina260.readCurrent(); // Returns current in mA
 }
