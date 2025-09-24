@@ -225,6 +225,17 @@ void drawLogo() {
   display.clearDisplay();
 }
 
+void showOK() {
+  display.clearDisplay();
+  display.setTextSize(3);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println("OK");
+  display.display();
+  delay(5000);
+  display.clearDisplay();
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000); // Give time for serial to initialize
@@ -270,8 +281,12 @@ void setup() {
   log("IP Address: ");
   log(String(wifiManager.getIPAddress()));
 
+  showOK();
   showText("IP:" + String(wifiManager.getIPAddress()));
 
+  if (strlen(DATA_URL) == 0) {
+    showText("DATA wont send", 2);
+  }
   configureOTA();
 }
 
@@ -533,13 +548,6 @@ void startMotorTest(JsonDocument& config) {
   log("Re-initializing ESC for new test...");
   showText("Initializing ESC...", 1);
   
-  // if (!motor.initialize()) {
-  //   log("ESC initialization failed! Cannot start test.");
-  //   showText("ESC Init Failed!", 1);
-  //   delay(2000);
-  //   return;
-  // }
-  
   log("ESC initialized successfully for test");
   showText("ESC Ready", 1);
   delay(1000);
@@ -666,6 +674,12 @@ void runMotorTest(JsonDocument& config) {
 void sendBufferedData() {
   if (sensorBuffer.empty() || currentTestId.isEmpty()) {
     log("sendBufferedData: Buffer is empty or no test ID");
+    return;
+  }
+  
+  // Check if DATA_URL is empty using strlen for C-style string
+  if (strlen(DATA_URL) == 0) {
+    log("sendBufferedData: No data URL configured");
     return;
   }
   
