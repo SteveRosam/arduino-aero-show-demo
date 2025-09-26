@@ -718,8 +718,14 @@ void sendBufferedData() {
   showText("Sending buffer", 3);
   
   HTTPClient http;
-  String url = DATA_URL + currentTestId;
+  String url = DATA_URL;
+
+  // Ensure DATA_URL ends with a slash
+  if (url.length() > 0 && url.charAt(url.length() - 1) != '/') {
+    url += '/';
+  }
   
+  url += currentTestId;  
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
   
@@ -748,6 +754,8 @@ void sendBufferedData() {
   serializeJson(doc, jsonString);
   
   log("Sending HTTP POST request...");
+  log("URL: " + url);
+  log("JSON: " + jsonString);
   int httpResponseCode = http.POST(jsonString);
   
   if (httpResponseCode > 0) {
