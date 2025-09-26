@@ -108,7 +108,7 @@ long readHX711();
 void addToSerialBuffer(String line);
 String getSerialOutput();
 void log(String message);
-void showText(String text, int line);
+void showText(String text, int line, bool clear);
 void configureOTA();
 
 
@@ -125,11 +125,14 @@ void configureOTA() {
     } else {
       type = "filesystem";
     }
-    log("Start updating " + type);
+    log("Start OTA update: " + type);
+    showText("Start OTA update: " + type, 1, true);
   });
 
   ArduinoOTA.onEnd([]() {
     log("\nOTA Update Complete!");
+    showText("OTA Update Complete!", 1, true);
+    delay(1000);
   });
 
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -140,14 +143,19 @@ void configureOTA() {
     log(String("Error[%u]: ", error));
     if (error == OTA_AUTH_ERROR) {
       log("Auth Failed");
+      showText("OTA Auth Failed", 1, true);
     } else if (error == OTA_BEGIN_ERROR) {
       log("Begin Failed");
+      showText("OTA Begin Failed", 1, true);
     } else if (error == OTA_CONNECT_ERROR) {
       log("Connect Failed");
+      showText("OTA Connect Failed", 1, true);
     } else if (error == OTA_RECEIVE_ERROR) {
       log("Receive Failed");
+      showText("OTA Receive Failed", 1, true);
     } else if (error == OTA_END_ERROR) {
       log("End Failed");
+      showText("OTA End Failed", 1, true);
     }
   });
 
@@ -156,8 +164,10 @@ void configureOTA() {
 }
 
 const int TEXT_HEIGHT = 8;
-void showText(String text = "", int line = 0) {
-  
+void showText(String text = "", int line = 0, bool clear = false) {
+  if (clear) {
+    display.clearDisplay();
+  }
   // Clear just this line by drawing a black rectangle over it
   display.fillRect(0, line * TEXT_HEIGHT, SCREEN_WIDTH, TEXT_HEIGHT, SSD1306_BLACK);
   display.setTextSize(1);
@@ -168,9 +178,7 @@ void showText(String text = "", int line = 0) {
 }
 
 void setupDisplay(){
-  log("Trying address 0x3C...");
   if(display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS_1)) {
-    log("Display found at 0x3C!");
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
@@ -248,9 +256,7 @@ void setup() {
   // Initial debug output
   log("\n=== AeroShow ESP32 Starting ===");
   log("Debug output initialized");
-  log("Free heap: ");
-  log(String(ESP.getFreeHeap()));
-  log(" bytes");
+  log(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
   log("ESP32 Motor Control & Sensor System Starting...");
 
   wifiManager.setReportURL(REPORT_URL);
@@ -274,12 +280,10 @@ void setup() {
   setupWebServer();
   
   loadCellTareValue = readLoadCell();
-  log("Load cell tare value: ");
-  log(String(loadCellTareValue));
+  log(String("Load cell tare value: ") + String(loadCellTareValue));
 
   log("System ready!");
-  log("IP Address: ");
-  log(String(wifiManager.getIPAddress()));
+  log(String("IP Address: ") + String(wifiManager.getIPAddress()));
 
   showOK();
   showText("IP:" + String(wifiManager.getIPAddress()));
@@ -440,11 +444,6 @@ void setupWebServer() {
   // Get the server instance from WiFiManager
   WebServer& server = wifiManager.getServer();
   
-  // Set up root handler
-  // server.on("/", HTTP_GET, [&server]() {
-  //   server.send(200, "text/plain", "ESP32 Web Server is running!");
-  // });
-
   server.on("/", HTTP_GET, handleRoot);
 
   log(" - Root handler registered");
@@ -455,9 +454,7 @@ void setupWebServer() {
   
   // Start the server on all interfaces
   server.begin(80);
-  log("Web server started on http://");
-  log(wifiManager.getIPAddress());
-  log(":80");
+  log(String("Web server started on http://") + wifiManager.getIPAddress() + ":80");
 }
 
 String getSerialOutput() {
@@ -510,8 +507,7 @@ void handleMotorControl() {
   }
   
   String requestBody = server.arg("plain");
-  log("Received motor control request:");
-  log(requestBody);
+  log(String("Received motor control request:") + requestBody);
   
   String body = server.arg("plain");
   JsonDocument doc;
@@ -565,9 +561,56 @@ void startMotorTest(JsonDocument& config) {
   // Set the first speed from the test configuration
   if (testState.speeds.size() > 0) {
     float initialSpeed = testState.speeds[0];
-    motor.setSpeed(initialSpeed);
-    currentSpeed = initialSpeed;
-    log("Setting initial speed to: " + String(initialSpeed));
+    
+    
+    // Calculate the microsecond range
+    // ESCController uses 1000-2000 microsecond range by default
+    const int MIN_PULSE = 1000;
+    const int MAX_PULSE = 2000;
+    const int PULSE_RANGE = MAX_PULSE - MIN_PULSE;
+    
+    // Calculate target pulse width for the initial speed
+    int targetPulse = MIN_PULSE + (int)(initialSpeed * PULSE_RANGE);
+    int startPulse = MIN_PULSE;  // Start at 0 speed (minimum pulse)
+    int pulseDifference = targetPulse - startPulse;
+    
+    // Calculate timing for 1 second ramp
+    unsigned long rampStartTime = millis();
+    const unsigned long RAMP_DURATION = 3000; // 1 second in milliseconds
+
+    log("Ramping speed from 0 to " + String(initialSpeed) + " over " + String(RAMP_DURATION) + "ms...");
+    
+    // If we need to ramp up
+    if (pulseDifference > 0) {
+      // Calculate delay between increments to fit all steps in 1 second
+      float delayPerStep = (float)RAMP_DURATION / (float)pulseDifference;
+      
+      // Perform the ramp
+      for (int pulse = startPulse; pulse <= targetPulse; pulse++) {
+        // Convert pulse width back to 0.0-1.0 range for ESCController
+        float speed = (float)(pulse - MIN_PULSE) / (float)PULSE_RANGE;
+        motor.setSpeed(speed);
+        currentSpeed = speed;
+        
+        // Calculate when this step should occur
+        unsigned long targetTime = rampStartTime + (unsigned long)((pulse - startPulse) * delayPerStep);
+        
+        // Wait until it's time for this step
+        while (millis() < targetTime) {
+          // Small delay to prevent tight loop
+          delayMicroseconds(100);
+        }
+      }
+      
+      log("Ramp complete! Final speed: " + String(initialSpeed));
+    } else {
+      // If initial speed is 0, just set it directly
+      motor.setSpeed(initialSpeed);
+      currentSpeed = initialSpeed;
+      log("Initial speed is 0, no ramping needed");
+    }
+
+
   } else {
     motor.setSpeed(0.0);
     currentSpeed = 0.0;
@@ -577,12 +620,9 @@ void startMotorTest(JsonDocument& config) {
   // Start data collection
   lastSendTime = millis();
   
-  log("Test ID: ");
-  log(currentTestId);
-  log("Number of speed steps: ");
-  log(testState.speeds.size());
-  log("Ramp delay (ms): ");
-  log(testState.rampDelay);
+  log(String("Test ID: ") + currentTestId);
+  log(String("Number of speed steps: ") + testState.speeds.size());
+  log(String("Ramp delay (ms): ") + testState.rampDelay);
 
   showText("Starting Test with " + String(testState.rampDelay / 100, 2) + "s per step", 1);
   delay(1000);
@@ -611,15 +651,6 @@ void updateMotorTest() {
     lastSpeedIndex = testState.currentSpeedIndex;
   }
   
-  log("-----------------------------");
-  log("Current speed index: ");
-  log(testState.currentSpeedIndex);
-  log("Number of speed steps: ");
-  log(testState.speeds.size());
-  log("Ramp delay (ms): ");
-  log(testState.rampDelay); 
-  log("-----------------------------");
-
   // Check if it's time to move to the next speed
   if (millis() - testState.speedStartTime >= testState.rampDelay) {
     testState.currentSpeedIndex++;
@@ -683,10 +714,8 @@ void sendBufferedData() {
     return;
   }
   
-  // log("Sending ");
+  log("Sending " + String(sensorBuffer.size()) + " data points to server...");
   showText("Sending buffer", 3);
-  log(String(sensorBuffer.size()));
-  log(" data points to server...");
   
   HTTPClient http;
   String url = DATA_URL + currentTestId;
@@ -697,8 +726,6 @@ void sendBufferedData() {
   // Create JSON document with array of sensor readings
   DynamicJsonDocument doc(16384);  // Allocate 16KB for the document
   JsonArray data = doc.createNestedArray("data");
-  
-  // log("Created JSON document");
   
   // Add all buffered readings to the JSON array
   for (const auto& reading : sensorBuffer) {
@@ -726,7 +753,6 @@ void sendBufferedData() {
   if (httpResponseCode > 0) {
     String response = http.getString();
     log("Success! Sent " + String(sensorBuffer.size()) + " samples. Response: " + String(httpResponseCode));
-    // log("Server response: " + String(response));
     showText("Buffer send success", 3);
   } else {
     log("Error sending data: " + String(httpResponseCode));
@@ -803,10 +829,6 @@ bool isLoadCellReady() {
   if (now - lastPrint > 2000) {
     lastPrint = now;
     float readyPercent = (readyCount * 100.0) / (readyCount + notReadyCount);
-    // log("HX711 Ready: ");
-    // log(String(readyPercent));
-    // log("%, DT pin state: ");
-    // log(digitalRead(HX711_DT_PIN) ? "HIGH" : "LOW");
     readyCount = 0;
     notReadyCount = 0;
   }
@@ -843,17 +865,6 @@ float readLoadCell() {
     lastValidLoadCellValue = (float)rawValue;
     lastLoadCellUpdate = millis();
     b_loadCellReady = true;
-    
-    // Print debug info (throttled)
-    static unsigned long lastPrint = 0;
-    if (millis() - lastPrint > 1000) {
-      log("HX711 Raw: ");
-      log(String(rawValue));
-      log(", Value: ");
-      log(String(lastValidLoadCellValue));
-      log("\n");
-      lastPrint = millis();
-    }
     
     return lastValidLoadCellValue;
   }

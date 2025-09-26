@@ -9,20 +9,15 @@ bool ESCController::initialize() {
     // Attach the ESC to the pin with specified pulse width range
     esc.attach(pin, minPulse, maxPulse);
     
-    Serial.println("Initializing ESC...");
-    
     // ESC calibration sequence
     // Most ESCs require seeing max then min throttle at power-on
-    Serial.println("Setting max throttle for calibration...");
-    esc.writeMicroseconds(maxPulse);
+    // esc.writeMicroseconds(maxPulse);
     delay(500); // Wait for ESC to register max throttle
     
-    Serial.println("Setting min throttle...");
     esc.writeMicroseconds(minPulse);
     delay(3000); // Wait for ESC to complete initialization (listen for beeps)
     
     // Some ESCs need a slight throttle bump to confirm arming
-    Serial.println("Arming ESC...");
     esc.writeMicroseconds(minPulse + 50);
     delay(500);
     esc.writeMicroseconds(minPulse);
@@ -31,13 +26,11 @@ bool ESCController::initialize() {
     initialized = true;
     currentSpeed = 0.0;
     
-    Serial.println("ESC initialization complete!");
     return true;
 }
 
 void ESCController::setSpeed(float speed) {
     if (!initialized) {
-        Serial.println("Error: ESC not initialized!");
         return;
     }
     
@@ -51,12 +44,6 @@ void ESCController::setSpeed(float speed) {
     esc.writeMicroseconds(pulseWidth);
     
     currentSpeed = speed;
-    
-    Serial.print("Speed set to: ");
-    Serial.print(speed * 100);
-    Serial.print("% (");
-    Serial.print(pulseWidth);
-    Serial.println(" us)");
 }
 
 void ESCController::stop() {
@@ -73,11 +60,8 @@ bool ESCController::isInitialized() const {
 
 void ESCController::arm() {
     if (!initialized) {
-        Serial.println("Error: ESC not initialized!");
         return;
     }
-    
-    Serial.println("Arming ESC...");
     
     // Standard arming sequence
     esc.writeMicroseconds(minPulse);
